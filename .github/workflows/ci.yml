@@ -27,7 +27,7 @@ jobs:
           cache: 'npm'
 
       - name: Install Composer dependencies
-        run: composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
       - name: Install npm dependencies
         run: npm ci
@@ -52,6 +52,9 @@ jobs:
 
       - name: Run tests
         run: php artisan test
+
+      - name: Remove dev dependencies before packaging
+        run: composer install --no-interaction --prefer-dist --optimize-autoloader --no-dev
 
       - name: Upload build artifact
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
