@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Set Laravel public dir as nginx root
-cp /home/site/wwwroot/nginx.conf /etc/nginx/sites-available/default
+# Point nginx at Laravel's public directory
+sed -i 's|/home/site/wwwroot|/home/site/wwwroot/public|g' /etc/nginx/sites-available/default
 
-# Ensure storage and bootstrap/cache are writable
-chmod -R 775 /home/site/wwwroot/storage /home/site/wwwroot/bootstrap/cache
+# Fix permissions
+chmod -R 775 /home/site/wwwroot/storage /home/site/wwwroot/bootstrap/cache 2>/dev/null || true
 
-# Create SQLite database if it doesn't exist
+# Create SQLite DB if missing
 touch /home/site/wwwroot/database/database.sqlite
 
 # Run migrations
-cd /home/site/wwwroot && php artisan migrate --force
+cd /home/site/wwwroot && php artisan migrate --force 2>/dev/null || true
 
 # Reload nginx
-service nginx reload
+nginx -s reload 2>/dev/null || service nginx reload 2>/dev/null || true
