@@ -24,23 +24,112 @@ class TravelController extends Controller
             $validated = validator($request->all(), [
                 'destination' => 'required|string',
                 'travel_date' => 'required|date',
-                'return_date' => 'required|date|after:travel_date',
+                'return_date' => 'required|date|after_or_equal:travel_date',
             ])->validate();
 
-            // Clean destination name
-            $destination = trim(strtolower($validated['destination']));
-            
-            // Get weather data
-            $weatherData = $this->getWeatherData($destination);
+            $destination = trim($validated['destination']);
+            $travelDate = new \DateTime($validated['travel_date']);
+            $returnDate = new \DateTime($validated['return_date']);
+
+            $dailyWeather = $this->getForecastByDay($destination, $travelDate, $returnDate);
 
             return response()->json([
-                'weather_info' => $weatherData
+                'daily_weather' => $dailyWeather
             ]);
 
         } catch (\Exception $e) {
             \Log::error('Error in getRecommendations: ' . $e->getMessage());
             return response()->json(['error' => $e->getMessage()], 500);
         }
+    }
+
+    private function getForecastByDay($destination, \DateTime $from, \DateTime $to)
+    {
+        $apiKey = env('OPENWEATHER_API_KEY');
+        if (empty($apiKey)) {
+            throw new \Exception('OpenWeather API key not configured');
+        }
+
+        $response = Http::get('http://api.openweathermap.org/data/2.5/forecast', [
+            'q'       => $destination,
+            'appid'   => $apiKey,
+            'units'   => 'metric',
+            'cnt'     => 40, // max 5 days of 3-hour steps
+        ]);
+
+        if (!$response->successful()) {
+            throw new \Exception('Weather API error: ' . $response->status() . ' - ' . $response->body());
+        }
+
+        $data = $response->json();
+        $grouped = [];
+
+        foreach ($data['list'] as $entry) {
+            $date = substr($entry['dt_txt'], 0, 10); // "YYYY-MM-DD"
+            $entryDate = new \DateTime($date);
+
+            if ($entryDate < $from || $entryDate > $to) {
+                continue;
+            }
+
+            if (!isset($grouped[$date])) {
+                $grouped[$date] = ['temps' => [], 'conditions' => [], 'humidity' => [], 'wind' => [], 'icons' => []];
+            }
+
+            $grouped[$date]['temps'][]      = $entry['main']['temp'];
+            $grouped[$date]['humidity'][]   = $entry['main']['humidity'];
+            $grouped[$date]['wind'][]       = $entry['wind']['speed'];
+            $grouped[$date]['conditions'][] = $entry['weather'][0]['main'];
+            $grouped[$date]['icons'][]      = $entry['weather'][0]['icon'];
+        }
+
+        $result = [];
+        foreach ($grouped as $date => $values) {
+            // Pick the most frequent condition and its icon
+            $conditionCounts = array_count_values($values['conditions']);
+            arsort($conditionCounts);
+            $dominantCondition = array_key_first($conditionCounts);
+            // Find icon matching the dominant condition
+            $iconIndex = array_search($dominantCondition, $values['conditions']);
+            $icon = $values['icons'][$iconIndex] ?? $values['icons'][0];
+
+            $result[] = [
+                'date'        => $date,
+                'temp_min'    => round(min($values['temps'])),
+                'temp_max'    => round(max($values['temps'])),
+                'condition'   => $dominantCondition,
+                'humidity'    => round(array_sum($values['humidity']) / count($values['humidity'])),
+                'wind_speed'  => round(array_sum($values['wind']) / count($values['wind']), 1),
+                'icon'        => $icon,
+            ];
+        }
+
+        // If the date range extends beyond the 5-day forecast, fill remaining days with a note
+        $current = clone $from;
+        $allDates = [];
+        while ($current <= $to) {
+            $allDates[] = $current->format('Y-m-d');
+            $current->modify('+1 day');
+        }
+
+        $forecastDates = array_column($result, 'date');
+        foreach ($allDates as $d) {
+            if (!in_array($d, $forecastDates)) {
+                $result[] = [
+                    'date'       => $d,
+                    'temp_min'   => null,
+                    'temp_max'   => null,
+                    'condition'  => 'No forecast available',
+                    'humidity'   => null,
+                    'wind_speed' => null,
+                    'icon'       => null,
+                ];
+            }
+        }
+
+        usort($result, fn($a, $b) => strcmp($a['date'], $b['date']));
+
+        return $result;
     }
 
     public function getWeather($location, $date)

@@ -1,8 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { Head } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import TravelRecommendations from '@/Components/TravelRecommendations';
 import axios from 'axios';
+
+function WeatherIcon({ icon, condition }) {
+    if (!icon) return <span className="text-3xl">🌫️</span>;
+    return (
+        <img
+            src={`https://openweathermap.org/img/wn/${icon}@2x.png`}
+            alt={condition}
+            className="w-12 h-12"
+        />
+    );
+}
+
+function DayCard({ day }) {
+    const date = new Date(day.date + 'T12:00:00');
+    const label = date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    const noData = day.temp_max === null;
+
+    return (
+        <div className="flex flex-col items-center bg-gray-50 rounded-lg p-4 border border-gray-200 min-w-[110px]">
+            <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{label}</p>
+            <WeatherIcon icon={day.icon} condition={day.condition} />
+            <p className="text-sm font-medium text-gray-700 mt-1">{day.condition}</p>
+            {noData ? (
+                <p className="text-xs text-gray-400 mt-1">No forecast</p>
+            ) : (
+                <>
+                    <p className="text-sm font-bold text-gray-900 mt-1">
+                        {day.temp_max}° / {day.temp_min}°C
+                    </p>
+                    <div className="flex gap-2 mt-1 text-xs text-gray-500">
+                        <span>💧 {day.humidity}%</span>
+                        <span>💨 {day.wind_speed} m/s</span>
+                    </div>
+                </>
+            )}
+        </div>
+    );
+}
 
 export default function TravelPlanner({ auth }) {
     const [formData, setFormData] = useState({
@@ -10,21 +47,23 @@ export default function TravelPlanner({ auth }) {
         travel_date: '',
         return_date: '',
     });
-    const [recommendations, setRecommendations] = useState(null);
+    const [dailyWeather, setDailyWeather] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState(null);
 
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
+        setError(null);
+        setDailyWeather(null);
 
         try {
             const response = await axios.get('/api/travel/recommendations', {
                 params: formData
             });
-            setRecommendations(response.data);
-        } catch (error) {
-            console.error('Error:', error);
-            alert(`Error: ${error.response?.data?.error || error.message}`);
+            setDailyWeather(response.data.daily_weather);
+        } catch (err) {
+            setError(err.response?.data?.error || err.message);
         } finally {
             setLoading(false);
         }
@@ -32,10 +71,7 @@ export default function TravelPlanner({ auth }) {
 
     const handleInputChange = (e) => {
         const { name, value } = e.target;
-        setFormData(prev => ({
-            ...prev,
-            [name]: value
-        }));
+        setFormData(prev => ({ ...prev, [name]: value }));
     };
 
     return (
@@ -57,6 +93,7 @@ export default function TravelPlanner({ auth }) {
                                         id="destination"
                                         value={formData.destination}
                                         onChange={handleInputChange}
+                                        placeholder="e.g. London, Tokyo, Paris"
                                         className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
                                         required
                                     />
@@ -98,7 +135,7 @@ export default function TravelPlanner({ auth }) {
                                     <button
                                         type="submit"
                                         disabled={loading}
-                                        className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                                        className="inline-flex justify-center rounded-md border border-transparent bg-indigo-600 py-2 px-4 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:opacity-50"
                                     >
                                         {loading ? 'Checking Weather...' : 'Check Weather'}
                                     </button>
@@ -107,22 +144,26 @@ export default function TravelPlanner({ auth }) {
                         </div>
                     </div>
 
-                    {recommendations && (
-                        <div className="bg-white overflow-hidden shadow-sm sm:rounded-lg mb-6">
+                    {error && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6 text-red-700 text-sm">
+                            {error}
+                        </div>
+                    )}
+
+                    {dailyWeather && dailyWeather.length > 0 && (
+                        <div className="bg-white overflow-hidden shadow-sm sm:rounded-lg">
                             <div className="p-6">
                                 <h3 className="text-xl font-semibold text-gray-900 mb-4">
-                                    Weather in {formData.destination}
+                                    Weather forecast for {formData.destination}
                                 </h3>
-                                
-                                {recommendations.weather_info && (
-                                    <div className="space-y-2 text-gray-600">
-                                        <p>Temperature: {recommendations.weather_info.temp_c}°C</p>
-                                        <p>Condition: {recommendations.weather_info.condition}</p>
-                                        <p>Description: {recommendations.weather_info.description}</p>
-                                        <p>Humidity: {recommendations.weather_info.humidity}%</p>
-                                        <p>Wind Speed: {recommendations.weather_info.wind_speed} m/s</p>
-                                    </div>
-                                )}
+                                <div className="flex flex-wrap gap-3">
+                                    {dailyWeather.map(day => (
+                                        <DayCard key={day.date} day={day} />
+                                    ))}
+                                </div>
+                                <p className="text-xs text-gray-400 mt-4">
+                                    * OpenWeatherMap free tier provides up to 5 days of forecast. Days beyond that will show "No forecast".
+                                </p>
                             </div>
                         </div>
                     )}
@@ -130,4 +171,4 @@ export default function TravelPlanner({ auth }) {
             </div>
         </AuthenticatedLayout>
     );
-} 
+}
